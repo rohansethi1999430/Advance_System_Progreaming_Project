@@ -7,6 +7,9 @@
 #include <sys/types.h>
 #include <fcntl.h>
 
+//some global variables
+
+
 #define PORT 8081
 #define BUFFER_SIZE 1024
 
