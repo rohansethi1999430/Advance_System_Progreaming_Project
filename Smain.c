@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 
+//defining the global variables
 #define PORT 8080
 #define BUFFER_SIZE 1024
 
