@@ -16,6 +16,7 @@
 void handle_smain(int sock);
 
 int main() {
+    //server socket
     int server_sock, smain_sock;
     struct sockaddr_in server_addr, smain_addr;
     socklen_t addr_size;
