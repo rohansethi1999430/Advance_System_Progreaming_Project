@@ -32,6 +32,7 @@ int main() {
     }
 
     while (1) {
+        //while loop to connect to server and read
         printf("client24s$ ");
         bzero(command, BUFFER_SIZE);
         fgets(command, BUFFER_SIZE, stdin);
