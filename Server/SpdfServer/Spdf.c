@@ -8,10 +8,12 @@
 #include <netinet/in.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <dirent.h>  // Include for directory handling
 
 #define PORT 8091  // Port number for the Spdf server
 #define BUFFER_SIZE 1024
 
+// Function to create a directory if it doesn't exist
 void create_directory(const char *path) {
     char tmp[BUFFER_SIZE];
     char *p = NULL;
@@ -36,6 +38,27 @@ void create_directory(const char *path) {
     }
 }
 
+// Function to list files of a specific extension in a given directory
+void list_files(const char *directory, const char *extension, char *output) {
+    struct dirent *entry;
+    DIR *dp = opendir(directory);
+
+    if (dp == NULL) {
+        perror("Error opening directory");
+        return;
+    }
+
+    while ((entry = readdir(dp))) {
+        if (strstr(entry->d_name, extension)) {
+            strcat(output, entry->d_name);
+            strcat(output, "\n");
+        }
+    }
+
+    closedir(dp);
+}
+
+// Function to handle client (Smain) requests
 void handle_client(int client_socket) {
     char buffer[BUFFER_SIZE];
     int n;
@@ -53,7 +76,7 @@ void handle_client(int client_socket) {
         char *filename = strtok(NULL, " ");
         char *dest_path = strtok(NULL, " ");
 
-        if (command && filename && dest_path) {
+        if (command && filename) {
             printf("Received command: %s, filename: %s, destination: %s\n", command, filename, dest_path);
 
             if (strcmp(command, "ufile") == 0) {
@@ -79,7 +102,19 @@ void handle_client(int client_socket) {
                 fclose(fp);
                 printf("PDF file saved: %s\n", full_path);
                 strcpy(buffer, "PDF file saved successfully\n");
-            } else {
+            } 
+            else if (strcmp(command, "display") == 0) {
+                char file_list[BUFFER_SIZE * 10] = "";  // Buffer to hold the list of files
+
+                // List .pdf files in the requested directory
+                list_files(filename, ".pdf", file_list);
+
+                // Send the list back to Smain
+                write(client_socket, file_list, strlen(file_list));
+                printf("Sent PDF file list to Smain\n");
+                continue;
+            } 
+            else {
                 strcpy(buffer, "Unknown command\n");
             }
             write(client_socket, buffer, strlen(buffer));  // Send response to Smain

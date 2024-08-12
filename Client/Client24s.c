@@ -102,12 +102,31 @@ int main() {
             }
         }
 
+        // Handle 'rmfile' command
         if (strncmp("rmfile", command, 6) == 0) {
             char *filepath = strtok(command + 7, " "); // Get file path after 'rmfile '
             if (filepath != NULL) {
                 printf("Sending file removal request for: %s\n", filepath);
             }
         }
+
+        // Handle 'display' command
+if (strncmp("display", command, 7) == 0) {
+    char *pathname = strtok(command + 8, " "); // Get pathname after 'display '
+    if (pathname != NULL) {
+        printf("Requesting file list for: %s\n", pathname);
+
+        // Expecting a list of file names from the server
+        int bytes_received;
+        while ((bytes_received = read(client_socket, buffer, BUFFER_SIZE)) > 0) {
+            buffer[bytes_received] = '\0'; // Null-terminate the buffer
+            printf("%s", buffer); // Print the received list of files
+            if (bytes_received < BUFFER_SIZE) {
+                break;  // End of list
+            }
+        }
+    }
+}
 
         // Expect a response from the server
         int bytes_received = read(client_socket, buffer, BUFFER_SIZE);
