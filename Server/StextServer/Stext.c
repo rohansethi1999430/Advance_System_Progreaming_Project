@@ -8,10 +8,12 @@
 #include <netinet/in.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <fcntl.h>
 
-#define PORT 8081
+#define PORT 8801  // Port number for the Stext server
 #define BUFFER_SIZE 1024
 
+// Function to create the directory structure
 void create_directory(const char *path) {
     char tmp[BUFFER_SIZE];
     char *p = NULL;
@@ -51,18 +53,17 @@ void handle_client(int client_socket) {
 
         char *command = strtok(buffer, " ");
         char *filename = strtok(NULL, " ");
-        char *dest_path = strtok(NULL, " ");
+        char *dest_path = strtok(NULL, " ");  // Optional, might be NULL for rmfile
 
-        if (command && filename && dest_path) {
-            printf("Received command: %s, filename: %s, destination: %s\n", command, filename, dest_path);
+        if (command && filename) {
+            printf("Received command: %s, filename: %s\n", command, filename);
 
-            if (strcmp(command, "ufile") == 0) {
+            if (strcmp(command, "ufile") == 0 && dest_path) {  // ufile requires dest_path
                 printf("Creating directory: %s\n", dest_path);
-                create_directory(dest_path);  // Debugging point to verify directory creation
+                create_directory(dest_path);
 
                 char full_path[BUFFER_SIZE];
                 snprintf(full_path, sizeof(full_path), "%s/%s", dest_path, filename);
-                printf("Full path for file: %s\n", full_path);  // Debugging point to verify file path
 
                 FILE *fp = fopen(full_path, "w");
                 if (fp == NULL) {
@@ -79,11 +80,44 @@ void handle_client(int client_socket) {
                 }
                 fclose(fp);
                 printf("Text file saved: %s\n", full_path);
+
                 strcpy(buffer, "Text file saved successfully\n");
+                write(client_socket, buffer, strlen(buffer));  // Send success message to Smain
+                shutdown(client_socket, SHUT_RD);  // Shutdown the read side to close the communication cleanly
+                break;
+
+            } else if (strcmp(command, "dfile") == 0) {
+                printf("Sending Text file: %s\n", filename);
+                int fd = open(filename, O_RDONLY);
+                if (fd == -1) {
+                    perror("Error opening file");
+                    strcpy(buffer, "Error reading file\n");
+                    write(client_socket, buffer, strlen(buffer));
+                } else {
+                    while ((n = read(fd, buffer, BUFFER_SIZE)) > 0) {
+                        write(client_socket, buffer, n);
+                    }
+                    close(fd);
+                }
+            } else if (strcmp(command, "rmfile") == 0) {  // rmfile does not need dest_path
+                printf("Deleting file: %s\n", filename);
+                char full_path[BUFFER_SIZE];
+                snprintf(full_path, sizeof(full_path), "/home/chauha5a/ASP_Project_Main/Server/StextServer/%s", filename);
+
+                printf("Full path for deletion: %s\n", full_path);  // Debugging print statement
+
+                if (remove(full_path) == 0) {
+                    printf("File %s deleted successfully\n", full_path);
+                    strcpy(buffer, "File deleted successfully\n");
+                } else {
+                    perror("Error deleting file");
+                    strcpy(buffer, "Error deleting file\n");
+                }
+                write(client_socket, buffer, strlen(buffer));
             } else {
                 strcpy(buffer, "Unknown command\n");
+                write(client_socket, buffer, strlen(buffer));
             }
-            write(client_socket, buffer, strlen(buffer));  // Send response to Smain
         } else {
             printf("Invalid command received.\n");
             strcpy(buffer, "Invalid command\n");
@@ -95,6 +129,7 @@ void handle_client(int client_socket) {
 }
 
 
+// Main function to set up the server
 int main() {
     int server_socket, client_socket, len;
     struct sockaddr_in server_addr, client_addr;
@@ -114,7 +149,6 @@ int main() {
     }
 
     bzero(&server_addr, sizeof(server_addr));
-
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     server_addr.sin_port = htons(PORT);
