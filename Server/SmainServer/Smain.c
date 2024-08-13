@@ -9,11 +9,19 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <dirent.h>
 
 #define PORT 9080
 #define BUFFER_SIZE 1024
 #define PDF_SERVER_PORT 8091
 #define TEXT_SERVER_PORT 8801
+
+// Function declarations
+void create_directory(const char *path);
+void forward_file_to_server(int client_socket, const char *filename, const char *dest_path, const char *server_ip, int server_port);
+void retrieve_file_from_server(int client_socket, const char *filename, const char *server_ip, int server_port);
+void handle_rmfile_request(int client_socket, const char *filename, const char *server_ip, int server_port);
+void retrieve_file_list_from_server(const char *pathname, const char *server_ip, int server_port, char *combined_buffer);
 
 // Function to replace ~smain with ~spdf or ~stext in the destination path
 char* replace_substring(const char* str, const char* old_sub, const char* new_sub) {
@@ -51,39 +59,6 @@ char* replace_substring(const char* str, const char* old_sub, const char* new_su
 
     result[i] = '\0';
     return result;
-}
-
-void handle_rmfile_request(int client_socket, const char *filename, const char *server_ip, int server_port) {
-    int sock;
-    struct sockaddr_in server_addr;
-    char buffer[BUFFER_SIZE];
-    int n;
-
-    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-        perror("Socket creation failed");
-        return;
-    }
-
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(server_port);
-    server_addr.sin_addr.s_addr = inet_addr(server_ip);
-
-    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
-        perror("Connect failed");
-        close(sock);
-        return;
-    }
-
-    // Send the rmfile command to the respective server
-    snprintf(buffer, sizeof(buffer), "rmfile %s", filename);
-    send(sock, buffer, strlen(buffer), 0);
-
-    // Receive the response from the server and send it to the client
-    while ((n = read(sock, buffer, BUFFER_SIZE)) > 0) {
-        write(client_socket, buffer, n);
-    }
-
-    close(sock);
 }
 
 // Function to create the directory structure
@@ -141,7 +116,7 @@ void forward_file_to_server(int client_socket, const char *filename, const char 
     while ((n = read(client_socket, buffer, BUFFER_SIZE)) > 0) {
         printf("Smain read %d bytes\n", n);
         send(sock, buffer, n, 0);
-        printf("Smain sent %d bytes to Spdf\n", n);
+        printf("Smain sent %d bytes to server\n", n);
         if (n < BUFFER_SIZE) break;  // End of file
     }
 
@@ -183,9 +158,45 @@ void retrieve_file_from_server(int client_socket, const char *filename, const ch
     close(sock);
 }
 
+// Function to handle the rmfile request
+void handle_rmfile_request(int client_socket, const char *filename, const char *server_ip, int server_port) {
+    int sock;
+    struct sockaddr_in server_addr;
+    char buffer[BUFFER_SIZE];
+    int n;
+
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        perror("Socket creation failed");
+        return;
+    }
+
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(server_port);
+    server_addr.sin_addr.s_addr = inet_addr(server_ip);
+
+    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+        perror("Connect failed");
+        close(sock);
+        return;
+    }
+
+    // Send the rmfile command to the respective server
+    snprintf(buffer, sizeof(buffer), "rmfile %s", filename);
+    send(sock, buffer, strlen(buffer), 0);
+
+    // Receive the response from the server and send it to the client
+    while ((n = read(sock, buffer, BUFFER_SIZE)) > 0) {
+        write(client_socket, buffer, n);
+    }
+
+    close(sock);
+}
+
 // Function to handle the client request
 void prcclient(int client_socket) {
     char buffer[BUFFER_SIZE];
+    char combined_buffer[BUFFER_SIZE * 10];  // Buffer to store the combined response
+    combined_buffer[0] = '\0';  // Initialize the combined buffer
     int n;
 
     while (1) {
@@ -201,10 +212,62 @@ void prcclient(int client_socket) {
         char *filename = strtok(NULL, " ");
         char *dest_path = strtok(NULL, " ");
 
+        // Log the received command, filename, and destination path
+        printf("Command: %s, Filename: %s, Dest Path: %s\n", 
+               command ? command : "NULL", 
+               filename ? filename : "NULL", 
+               dest_path ? dest_path : "NULL");
+
         if (command && filename) {
             printf("Received command: %s, filename: %s\n", command, filename);
 
-            if (strcmp(command, "ufile") == 0) {
+            if (strcmp(command, "display") == 0) {
+                // Handle the display command
+                char full_path[BUFFER_SIZE];
+                snprintf(full_path, sizeof(full_path), "%s", filename);
+
+                // List files in the specified directory on Smain
+                printf("Listing files in: %s\n", full_path);
+                struct dirent *entry;
+                DIR *dp = opendir(full_path);
+
+                if (dp == NULL) {
+                    perror("Error opening directory");
+                    strcpy(buffer, "Error opening directory\n");
+                    write(client_socket, buffer, strlen(buffer));
+                    continue;
+                }
+
+                // Collect .c files from Smain
+                while ((entry = readdir(dp))) {
+                    if (entry->d_type == DT_REG && strstr(entry->d_name, ".c")) {
+                        snprintf(buffer, sizeof(buffer), "%s\n", entry->d_name);
+                        strcat(combined_buffer, buffer);  // Append to combined buffer
+                    }
+                }
+                closedir(dp);
+
+                // Request .pdf files from Spdf
+                retrieve_file_list_from_server(full_path, "127.0.0.1", PDF_SERVER_PORT, combined_buffer);
+
+                // Clear buffer before requesting from Stext
+                bzero(buffer, BUFFER_SIZE);
+
+                              // Request .txt files from Stext
+                retrieve_file_list_from_server(full_path, "127.0.0.1", TEXT_SERVER_PORT, combined_buffer);
+
+                // Send the combined response to the client
+                write(client_socket, combined_buffer, strlen(combined_buffer));
+
+                // Clear the combined buffer to avoid duplicates in future requests
+                bzero(combined_buffer, sizeof(combined_buffer));
+
+                // Indicate end of file list to the client
+                strcpy(buffer, "End of file list\n");
+                write(client_socket, buffer, strlen(buffer));
+            } 
+            // Handle other commands like ufile, dfile, rmfile...
+            else if (strcmp(command, "ufile") == 0) {
                 if (dest_path == NULL) {
                     strcpy(buffer, "Destination path missing\n");
                     write(client_socket, buffer, strlen(buffer));
@@ -248,74 +311,64 @@ void prcclient(int client_socket) {
                 // Send response to client after successful handling
                 write(client_socket, buffer, strlen(buffer));
 
-            } 
-            else if (strcmp(command, "dfile") == 0) {
-            if (strstr(filename, ".c") != NULL) {
-                printf("Sending .c file: %s\n", filename);
-                int fd = open(filename, O_RDONLY);
-                if (fd == -1) {
-                    perror("Error opening file");
-                    strcpy(buffer, "Error reading file\n");
-                    write(client_socket, buffer, strlen(buffer));
-                } else {
-                    while ((n = read(fd, buffer, BUFFER_SIZE)) > 0) {
-                        write(client_socket, buffer, n);
+            } else if (strcmp(command, "dfile") == 0) {
+                if (strstr(filename, ".c") != NULL) {
+                    printf("Sending .c file: %s\n", filename);
+                    int fd = open(filename, O_RDONLY);
+                    if (fd == -1) {
+                        perror("Error opening file");
+                        strcpy(buffer, "Error reading file\n");
+                        write(client_socket, buffer, strlen(buffer));
+                    } else {
+                        while ((n = read(fd, buffer, BUFFER_SIZE)) > 0) {
+                            write(client_socket, buffer, n);
+                        }
+                        close(fd);
                     }
-                    close(fd);
-                }
-            } else if (strstr(filename, ".pdf") != NULL) {
-                printf("Retrieving .pdf file from Spdf server\n");
-                retrieve_file_from_server(client_socket, filename, "127.0.0.1", PDF_SERVER_PORT);
-            } else if (strstr(filename, ".txt") != NULL) {
-                printf("Retrieving .txt file from Stext server\n");
-                retrieve_file_from_server(client_socket, filename, "127.0.0.1", TEXT_SERVER_PORT);
-            } else {
-                strcpy(buffer, "Unsupported file type\n");
-                write(client_socket, buffer, strlen(buffer));
-            }
-        }
-
-        if (strncmp(command, "rmfile", 6) == 0) {
-            if (strstr(filename, ".c") != NULL) {
-                printf("Deleting .c file: %s\n", filename);
-                char full_path[BUFFER_SIZE];
-                snprintf(full_path, sizeof(full_path), "/home/chauha5a/ASP_Project_Main/Server/SmainServer/%s", filename); // Ensure the full path is correct
-
-                printf("Attempting to delete file: %s\n", full_path);
-
-                if (remove(full_path) == 0) {
-                    printf("File %s deleted successfully\n", full_path);
-                    strcpy(buffer, "File deleted successfully\n");
+                } else if (strstr(filename, ".pdf") != NULL) {
+                    printf("Retrieving .pdf file from Spdf server\n");
+                    retrieve_file_from_server(client_socket, filename, "127.0.0.1", PDF_SERVER_PORT);
+                } else if (strstr(filename, ".txt") != NULL) {
+                    printf("Retrieving .txt file from Stext server\n");
+                    retrieve_file_from_server(client_socket, filename, "127.0.0.1", TEXT_SERVER_PORT);
                 } else {
-                    perror("Error deleting file");
-                    strcpy(buffer, "Error deleting file\n");
+                    strcpy(buffer, "Unsupported file type\n");
+                    write(client_socket, buffer, strlen(buffer));
                 }
-                write(client_socket, buffer, strlen(buffer));
-            }
+            } else if (strncmp(command, "rmfile", 6) == 0) {
+                if (strstr(filename, ".c") != NULL) {
+                    printf("Deleting .c file: %s\n", filename);
+                    char full_path[BUFFER_SIZE];
+                    snprintf(full_path, sizeof(full_path), "/home/chauha5a/ASP_Project_Main/Server/SmainServer/%s", filename);
 
-            else if (strstr(filename, ".pdf") != NULL) {
-                // Adjust the path from ~smain to ~spdf
-                dest_path = replace_substring(filename, "~smain", "~spdf");
-                printf("Forwarding delete request for .pdf file: %s to Spdf server\n", dest_path);
-                handle_rmfile_request(client_socket, dest_path, "127.0.0.1", PDF_SERVER_PORT);
-            } else if (strstr(filename, ".txt") != NULL) {
-                // Adjust the path from ~smain to ~stext
-                dest_path = replace_substring(filename, "~smain", "~stext");
-                printf("Forwarding delete request for .txt file: %s to Stext server\n", dest_path);
-                handle_rmfile_request(client_socket, dest_path, "127.0.0.1", TEXT_SERVER_PORT);
+                    printf("Attempting to delete file: %s\n", full_path);
 
-            }
-            else {
-                strcpy(buffer, "Unsupported file type for deletion\n");
-                write(client_socket, buffer, strlen(buffer));
-            }
-        }
-         else {
+                    if (remove(full_path) == 0) {
+                        printf("File %s deleted successfully\n", full_path);
+                        strcpy(buffer, "File deleted successfully\n");
+                    } else {
+                        perror("Error deleting file");
+                        strcpy(buffer, "Error deleting file\n");
+                    }
+                    write(client_socket, buffer, strlen(buffer));
+                } else if (strstr(filename, ".pdf") != NULL) {
+                    dest_path = replace_substring(filename, "~smain", "~spdf");
+                    printf("Forwarding delete request for .pdf file: %s to Spdf server\n", dest_path);
+                    handle_rmfile_request(client_socket, dest_path, "127.0.0.1", PDF_SERVER_PORT);
+                } else if (strstr(filename, ".txt") != NULL) {
+                    dest_path = replace_substring(filename, "~smain", "~stext");
+                    printf("Forwarding delete request for .txt file: %s to Stext server\n", dest_path);
+                    handle_rmfile_request(client_socket, dest_path, "127.0.0.1", TEXT_SERVER_PORT);
+                } else {
+                    strcpy(buffer, "Unsupported file type for deletion\n");
+                    write(client_socket, buffer, strlen(buffer));
+                }
+            } else {
                 strcpy(buffer, "Unknown command\n");
                 write(client_socket, buffer, strlen(buffer));
             }
         } else {
-            printf("Invalid command received.\n");
+            printf("Invalid command received or filename missing.\n");
             strcpy(buffer, "Invalid command\n");
             write(client_socket, buffer, strlen(buffer));
         }
@@ -324,10 +377,52 @@ void prcclient(int client_socket) {
     close(client_socket);
 }
 
+// Function to retrieve file list from another server (for .pdf and .txt files)
+void retrieve_file_list_from_server(const char *pathname, const char *server_ip, int server_port, char *combined_buffer) {
+    int sock;
+    struct sockaddr_in server_addr;
+    char buffer[BUFFER_SIZE];
+    int n;
+
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        perror("Socket creation failed");
+        return;
+    }
+
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(server_port);
+    server_addr.sin_addr.s_addr = inet_addr(server_ip);
+
+    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+        perror("Connect failed");
+        close(sock);
+        return;
+    }
+
+    printf("Sending display command to server: %s with path: %s\n", server_ip, pathname ? pathname : "NULL");
+
+    if (!pathname || strlen(pathname) == 0) {
+        snprintf(buffer, sizeof(buffer), "display");
+    } else {
+        snprintf(buffer, sizeof(buffer), "display %s", pathname);
+    }
+
+    send(sock, buffer, strlen(buffer), 0);
+
+    // Receive the file list from the server and append it to the combined buffer
+    while ((n = read(sock, buffer, BUFFER_SIZE)) > 0) {
+        buffer[n] = '\0';  // Null-terminate the received buffer
+        strcat(combined_buffer, buffer);  // Append to the combined buffer
+    }
+
+    close(sock);
+}
+
 // Main function to set up the server
 int main() {
-    int server_socket, client_socket, len;
+    int server_socket, client_socket;
     struct sockaddr_in server_addr, client_addr;
+    socklen_t len;
 
     server_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (server_socket < 0) {
