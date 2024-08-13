@@ -249,18 +249,23 @@ void prcclient(int client_socket) {
 
                 // Collect .c files from Smain
                 while ((entry = readdir(dp))) {
-                    if (entry->d_type == DT_REG && strstr(entry->d_name, ".c")) {
-                        int found = 0;
+                                        if (entry->d_type == DT_REG && strstr(entry->d_name, ".c")) {
+                        int is_duplicate = 0;
+
+                        // Check if the file is already in the list
                         for (int i = 0; i < file_count; i++) {
                             if (strcmp(file_list[i], entry->d_name) == 0) {
-                                found = 1;
+                                is_duplicate = 1;
                                 break;
                             }
                         }
-                        if (!found) {
+
+                        // If the file is not a duplicate, add it to the list
+                        if (!is_duplicate) {
+                            file_list[file_count] = strdup(entry->d_name);
                             snprintf(buffer, sizeof(buffer), "%s\n", entry->d_name);
                             strcat(combined_buffer, buffer);  // Append to combined buffer
-                            file_list[file_count++] = strdup(entry->d_name);  // Track the file name
+                            file_count++;
                         }
                     }
                 }
@@ -298,7 +303,7 @@ void prcclient(int client_socket) {
                     snprintf(full_path, sizeof(full_path), "%s/%s", dest_path, filename);
 
                     FILE *fp = fopen(full_path, "w");
-                    if (fp == NULL) {
+                                        if (fp == NULL) {
                         perror("Error opening file");
                         strcpy(buffer, "Error saving file\n");
                         write(client_socket, buffer, strlen(buffer));
@@ -390,8 +395,15 @@ void prcclient(int client_socket) {
         }
     }
 
+    // Free memory allocated for the file list before closing the client connection
+    for (int i = 0; i < file_count; i++) {
+        free(file_list[i]);
+    }
+
     close(client_socket);
 }
+
+// Function to retrieve file list from another server (for .pdf and .txt files)
 // Function to retrieve file list from another server (for .pdf and .txt files)
 void retrieve_file_list_from_server(const char *pathname, const char *server_ip, int server_port, char *combined_buffer, char **file_list, int *file_count) {
     int sock;
@@ -410,7 +422,7 @@ void retrieve_file_list_from_server(const char *pathname, const char *server_ip,
 
     if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
         perror("Connect failed");
-        close(sock);
+        close(sock);  // Ensure socket is closed on connect failure
         return;
     }
 
@@ -427,26 +439,31 @@ void retrieve_file_list_from_server(const char *pathname, const char *server_ip,
     // Receive the file list from the server and append it to the combined buffer
     while ((n = read(sock, buffer, BUFFER_SIZE)) > 0) {
         buffer[n] = '\0';  // Null-terminate the received buffer
-        char *file_name = strtok(buffer, "\n");
-        while (file_name != NULL) {
-            int duplicate = 0;
+        printf("Received from server %s: %s\n", server_ip, buffer);
+
+        // Check for duplicates before appending to combined buffer
+        char *token = strtok(buffer, "\n");
+        while (token != NULL) {
+            int is_duplicate = 0;
             for (int i = 0; i < *file_count; i++) {
-                if (strcmp(file_list[i], file_name) == 0) {
-                    duplicate = 1;
+                if (strcmp(file_list[i], token) == 0) {
+                    is_duplicate = 1;
                     break;
                 }
             }
-            if (!duplicate) {
-                strcat(combined_buffer, file_name);
+
+            if (!is_duplicate) {
+                file_list[*file_count] = strdup(token);
+                strcat(combined_buffer, token);
                 strcat(combined_buffer, "\n");
-                file_list[*file_count] = strdup(file_name);
                 (*file_count)++;
             }
-            file_name = strtok(NULL, "\n");
+
+            token = strtok(NULL, "\n");
         }
     }
-    printf("\nCombined buffer after processing server %s: %s", server_ip, combined_buffer);
-    close(sock);
+
+    close(sock);  // Close socket after processing the request
 }
 
 // Main function to set up the server
@@ -468,19 +485,19 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-     bzero(&server_addr, sizeof(server_addr));
+    bzero(&server_addr, sizeof(server_addr));
 
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     server_addr.sin_port = htons(PORT);
 
-    if (bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) != 0) {
+    if ((bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr))) != 0) {
         printf("Socket bind failed\n");
         exit(1);
     }
     printf("Socket binded successfully\n");
 
-    if (listen(server_socket, 5) != 0) {
+    if ((listen(server_socket, 5)) != 0) {
         printf("Listen failed\n");
         exit(1);
     }
