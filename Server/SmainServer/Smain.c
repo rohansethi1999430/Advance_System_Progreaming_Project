@@ -196,12 +196,19 @@ void handle_rmfile_request(int client_socket, const char *filename, const char *
 void prcclient(int client_socket) {
     char buffer[BUFFER_SIZE];
     char combined_buffer[BUFFER_SIZE * 10];  // Buffer to store the combined response
-    char *file_list[100];  // Array to keep track of unique file names
-    int file_count = 0;    // Counter for the file list
+    char *file_list[BUFFER_SIZE * 10];  // Array to track unique file names
+    int file_count = 0;  // Counter for files added to the list
     combined_buffer[0] = '\0';  // Initialize the combined buffer
     int n;
 
     while (1) {
+        // Reset the file list and count for each new command
+        for (int i = 0; i < file_count; i++) {
+            free(file_list[i]);
+        }
+        file_count = 0;
+        bzero(combined_buffer, sizeof(combined_buffer));
+        
         bzero(buffer, BUFFER_SIZE);
         n = read(client_socket, buffer, BUFFER_SIZE);
         if (n <= 0) {
@@ -243,18 +250,17 @@ void prcclient(int client_socket) {
                 // Collect .c files from Smain
                 while ((entry = readdir(dp))) {
                     if (entry->d_type == DT_REG && strstr(entry->d_name, ".c")) {
-                        int duplicate = 0;
+                        int found = 0;
                         for (int i = 0; i < file_count; i++) {
-                                                       if (strcmp(file_list[i], entry->d_name) == 0) {
-                                duplicate = 1;
+                            if (strcmp(file_list[i], entry->d_name) == 0) {
+                                found = 1;
                                 break;
                             }
                         }
-                        if (!duplicate) {
+                        if (!found) {
                             snprintf(buffer, sizeof(buffer), "%s\n", entry->d_name);
                             strcat(combined_buffer, buffer);  // Append to combined buffer
-                            file_list[file_count] = strdup(entry->d_name);  // Store unique file name
-                            file_count++;
+                            file_list[file_count++] = strdup(entry->d_name);  // Track the file name
                         }
                     }
                 }
@@ -271,9 +277,6 @@ void prcclient(int client_socket) {
 
                 // Send the combined response to the client
                 write(client_socket, combined_buffer, strlen(combined_buffer));
-
-                // Clear the combined buffer to avoid duplicates in future requests
-                bzero(combined_buffer, sizeof(combined_buffer));
 
                 // Indicate end of file list to the client
                 strcpy(buffer, "End of file list\n");
@@ -389,7 +392,6 @@ void prcclient(int client_socket) {
 
     close(client_socket);
 }
-
 // Function to retrieve file list from another server (for .pdf and .txt files)
 void retrieve_file_list_from_server(const char *pathname, const char *server_ip, int server_port, char *combined_buffer, char **file_list, int *file_count) {
     int sock;
