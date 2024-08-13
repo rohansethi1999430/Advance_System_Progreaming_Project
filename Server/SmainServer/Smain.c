@@ -21,7 +21,7 @@ void create_directory(const char *path);
 void forward_file_to_server(int client_socket, const char *filename, const char *dest_path, const char *server_ip, int server_port);
 void retrieve_file_from_server(int client_socket, const char *filename, const char *server_ip, int server_port);
 void handle_rmfile_request(int client_socket, const char *filename, const char *server_ip, int server_port);
-void retrieve_file_list_from_server(const char *pathname, const char *server_ip, int server_port, char *combined_buffer);
+void retrieve_file_list_from_server(const char *pathname, const char *server_ip, int server_port, char *combined_buffer, char **file_list, int *file_count);
 
 // Function to replace ~smain with ~spdf or ~stext in the destination path
 char* replace_substring(const char* str, const char* old_sub, const char* new_sub) {
@@ -196,6 +196,8 @@ void handle_rmfile_request(int client_socket, const char *filename, const char *
 void prcclient(int client_socket) {
     char buffer[BUFFER_SIZE];
     char combined_buffer[BUFFER_SIZE * 10];  // Buffer to store the combined response
+    char *file_list[100];  // Array to keep track of unique file names
+    int file_count = 0;    // Counter for the file list
     combined_buffer[0] = '\0';  // Initialize the combined buffer
     int n;
 
@@ -241,20 +243,31 @@ void prcclient(int client_socket) {
                 // Collect .c files from Smain
                 while ((entry = readdir(dp))) {
                     if (entry->d_type == DT_REG && strstr(entry->d_name, ".c")) {
-                        snprintf(buffer, sizeof(buffer), "%s\n", entry->d_name);
-                        strcat(combined_buffer, buffer);  // Append to combined buffer
+                        int duplicate = 0;
+                        for (int i = 0; i < file_count; i++) {
+                                                       if (strcmp(file_list[i], entry->d_name) == 0) {
+                                duplicate = 1;
+                                break;
+                            }
+                        }
+                        if (!duplicate) {
+                            snprintf(buffer, sizeof(buffer), "%s\n", entry->d_name);
+                            strcat(combined_buffer, buffer);  // Append to combined buffer
+                            file_list[file_count] = strdup(entry->d_name);  // Store unique file name
+                            file_count++;
+                        }
                     }
                 }
                 closedir(dp);
 
                 // Request .pdf files from Spdf
-                retrieve_file_list_from_server(full_path, "127.0.0.1", PDF_SERVER_PORT, combined_buffer);
+                retrieve_file_list_from_server(full_path, "127.0.0.1", PDF_SERVER_PORT, combined_buffer, file_list, &file_count);
 
                 // Clear buffer before requesting from Stext
                 bzero(buffer, BUFFER_SIZE);
 
-                              // Request .txt files from Stext
-                retrieve_file_list_from_server(full_path, "127.0.0.1", TEXT_SERVER_PORT, combined_buffer);
+                // Request .txt files from Stext
+                retrieve_file_list_from_server(full_path, "127.0.0.1", TEXT_SERVER_PORT, combined_buffer, file_list, &file_count);
 
                 // Send the combined response to the client
                 write(client_socket, combined_buffer, strlen(combined_buffer));
@@ -378,7 +391,7 @@ void prcclient(int client_socket) {
 }
 
 // Function to retrieve file list from another server (for .pdf and .txt files)
-void retrieve_file_list_from_server(const char *pathname, const char *server_ip, int server_port, char *combined_buffer) {
+void retrieve_file_list_from_server(const char *pathname, const char *server_ip, int server_port, char *combined_buffer, char **file_list, int *file_count) {
     int sock;
     struct sockaddr_in server_addr;
     char buffer[BUFFER_SIZE];
@@ -412,9 +425,25 @@ void retrieve_file_list_from_server(const char *pathname, const char *server_ip,
     // Receive the file list from the server and append it to the combined buffer
     while ((n = read(sock, buffer, BUFFER_SIZE)) > 0) {
         buffer[n] = '\0';  // Null-terminate the received buffer
-        strcat(combined_buffer, buffer);  // Append to the combined buffer
+        char *file_name = strtok(buffer, "\n");
+        while (file_name != NULL) {
+            int duplicate = 0;
+            for (int i = 0; i < *file_count; i++) {
+                if (strcmp(file_list[i], file_name) == 0) {
+                    duplicate = 1;
+                    break;
+                }
+            }
+            if (!duplicate) {
+                strcat(combined_buffer, file_name);
+                strcat(combined_buffer, "\n");
+                file_list[*file_count] = strdup(file_name);
+                (*file_count)++;
+            }
+            file_name = strtok(NULL, "\n");
+        }
     }
-
+    printf("\nCombined buffer after processing server %s: %s", server_ip, combined_buffer);
     close(sock);
 }
 
@@ -437,19 +466,19 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    bzero(&server_addr, sizeof(server_addr));
+     bzero(&server_addr, sizeof(server_addr));
 
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     server_addr.sin_port = htons(PORT);
 
-    if ((bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr))) != 0) {
+    if (bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) != 0) {
         printf("Socket bind failed\n");
         exit(1);
     }
     printf("Socket binded successfully\n");
 
-    if ((listen(server_socket, 5)) != 0) {
+    if (listen(server_socket, 5) != 0) {
         printf("Listen failed\n");
         exit(1);
     }
