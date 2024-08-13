@@ -238,6 +238,7 @@ void prcclient(int client_socket) {
                 // List files in the specified directory on Smain
                 printf("Listing files in: %s\n", full_path);
                 struct dirent *entry;
+                struct stat entry_stat;
                 DIR *dp = opendir(full_path);
 
                 if (dp == NULL) {
@@ -249,7 +250,11 @@ void prcclient(int client_socket) {
 
                 // Collect .c files from Smain
                 while ((entry = readdir(dp))) {
-                                        if (entry->d_type == DT_REG && strstr(entry->d_name, ".c")) {
+                    char entry_path[BUFFER_SIZE];
+                    snprintf(entry_path, sizeof(entry_path), "%s/%s", full_path, entry->d_name);
+                    
+                    // Use stat to get file information
+                    if (stat(entry_path, &entry_stat) == 0 && S_ISREG(entry_stat.st_mode) && strstr(entry->d_name, ".c")) {
                         int is_duplicate = 0;
 
                         // Check if the file is already in the list
@@ -303,7 +308,7 @@ void prcclient(int client_socket) {
                     snprintf(full_path, sizeof(full_path), "%s/%s", dest_path, filename);
 
                     FILE *fp = fopen(full_path, "w");
-                                        if (fp == NULL) {
+                    if (fp == NULL) {
                         perror("Error opening file");
                         strcpy(buffer, "Error saving file\n");
                         write(client_socket, buffer, strlen(buffer));
@@ -384,7 +389,156 @@ void prcclient(int client_socket) {
                     strcpy(buffer, "Unsupported file type for deletion\n");
                     write(client_socket, buffer, strlen(buffer));
                 }
-            } else {
+            }
+            else if (strcmp(command, "dtar") == 0)
+            {
+                char tar_file[BUFFER_SIZE];
+                char filetype[10];
+                snprintf(filetype, sizeof(filetype), "%s", filename); // filename holds the filetype in this case
+
+                if (strcmp(filetype, ".c") == 0)
+                {
+                    printf("Creating tarball for .c files\n");
+
+                    snprintf(tar_file, sizeof(tar_file), "/home/chauha5a/ASP_Project_Main/Server/SmainServer/cfiles.tar");
+
+                    // Create the tarball of all .c files in the ~smain directory
+                    system("find /home/chauha5a/ASP_Project_Main/Server/SmainServer/~smain -name '*.c' | tar -cvf /home/chauha5a/ASP_Project_Main/Server/SmainServer/cfiles.tar -T -");
+
+                    printf("Created tar file for .c files: %s\n", tar_file);
+                }
+                else if (strcmp(filetype, ".pdf") == 0)
+                {
+                    snprintf(tar_file, sizeof(tar_file), "/home/chauha5a/pdffiles.tar");
+                    int sock = socket(AF_INET, SOCK_STREAM, 0);
+                    if (sock == -1)
+                    {
+                        perror("Socket creation failed");
+                        return;
+                    }
+                    struct sockaddr_in server_addr;
+                    server_addr.sin_family = AF_INET;
+                    server_addr.sin_port = htons(PDF_SERVER_PORT);
+                    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+                    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1)
+                    {
+                        perror("Connect failed");
+                        close(sock);
+                        return;
+                    }
+
+                    // Requesting tar file from Spdf
+                    snprintf(buffer, sizeof(buffer), "dtar .pdf");
+                    send(sock, buffer, strlen(buffer), 0);
+
+                    // Opening a file to store the tar received from Spdf
+                    int fd = open(tar_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                    if (fd == -1)
+                    {
+                        perror("Error opening file");
+                        close(sock);
+                        return;
+                    }
+
+                    // Receiving the tar file from Spdf
+                    while ((n = read(sock, buffer, BUFFER_SIZE)) > 0)
+                    {
+                        if (write(fd, buffer, n) != n)
+                        {
+                            perror("Error writing to tar file");
+                            break;
+                        }
+                        printf("Received %d bytes of tar file from Spdf\n", n);
+                    }
+
+                    close(fd);
+                    close(sock);
+                    printf("Received tar file for .pdf files: %s\n", tar_file);
+
+                }
+                else if (strcmp(filetype, ".txt") == 0)
+                {
+                    snprintf(tar_file, sizeof(tar_file), "/home/chauha5a/txtfiles.tar");
+                    int sock = socket(AF_INET, SOCK_STREAM, 0);
+                    if (sock == -1)
+                    {
+                        perror("Socket creation failed");
+                        return;
+                    }
+                    struct sockaddr_in server_addr;
+                    server_addr.sin_family = AF_INET;
+                    server_addr.sin_port = htons(TEXT_SERVER_PORT);
+                    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+                    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1)
+                    {
+                        perror("Connect failed");
+                        close(sock);
+                        return;
+                    }
+
+                    // Requesting tar file from Stext
+                    snprintf(buffer, sizeof(buffer), "dtar .txt");
+                    send(sock, buffer, strlen(buffer), 0);
+
+                    // Opening a file to store the tar received from Stext
+                    int fd = open(tar_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                    if (fd == -1)
+                    {
+                        perror("Error opening file");
+                        close(sock);
+                        return;
+                    }
+
+                    // Receiving the tar file from Stext
+                    while ((n = read(sock, buffer, BUFFER_SIZE)) > 0)
+                    {
+                        if (write(fd, buffer, n) != n)
+                        {
+                            perror("Error writing to tar file");
+                            break;
+                        }
+                        printf("Received %d bytes of tar file from Stext\n", n);
+                    }
+
+                    close(fd);
+                    close(sock);
+                    printf("Received tar file for .txt files: %s\n", tar_file);
+                }
+                else
+                {
+                    strcpy(buffer, "Unsupported file type\n");
+                    write(client_socket, buffer, strlen(buffer));
+                    return;
+                }
+
+                // Send the tar file to the client
+                FILE *fp = fopen(tar_file, "rb");
+                if (fp == NULL)
+                {
+                    perror("Error opening tar file");
+                    strcpy(buffer, "Error reading tar file\n");
+                    write(client_socket, buffer, strlen(buffer));
+                }
+                else
+                {
+                    while ((n = fread(buffer, sizeof(char), BUFFER_SIZE, fp)) > 0)
+                    {
+                        if (write(client_socket, buffer, n) != n)
+                        {
+                            perror("Error sending tar file to client");
+                            break;
+                        }
+                        printf("Sent %d bytes of tar file to client\n", n); // Debug print
+                    }
+                    fclose(fp);
+                    printf("Tar file %s sent to client\n", tar_file);
+                }
+            }
+            
+            
+             else {
                 strcpy(buffer, "Unknown command\n");
                 write(client_socket, buffer, strlen(buffer));
             }
@@ -403,7 +557,7 @@ void prcclient(int client_socket) {
     close(client_socket);
 }
 
-// Function to retrieve file list from another server (for .pdf and .txt files)
+
 // Function to retrieve file list from another server (for .pdf and .txt files)
 void retrieve_file_list_from_server(const char *pathname, const char *server_ip, int server_port, char *combined_buffer, char **file_list, int *file_count) {
     int sock;
