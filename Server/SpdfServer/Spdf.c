@@ -154,7 +154,9 @@ void handle_client(int client_socket) {
 
             } else if (strcmp(command, "dfile") == 0) {
                 printf("Sending PDF file: %s\n", filename);
-                int fd = open(filename, O_RDONLY);
+                char *full_path = map_path(filename);
+                printf("Mapped path: %s\n", full_path);
+                int fd = open(full_path, O_RDONLY);
                 if (fd == -1) {
                     perror("Error opening file");
                     strcpy(buffer, "Error reading file\n");
@@ -163,6 +165,7 @@ void handle_client(int client_socket) {
                     while ((n = read(fd, buffer, BUFFER_SIZE)) > 0) {
                         write(client_socket, buffer, n);
                     }
+                    close(client_socket);
                     close(fd);
                 }
             } else if (strcmp(command, "rmfile") == 0) {

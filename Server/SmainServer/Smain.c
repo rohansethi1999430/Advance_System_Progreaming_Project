@@ -670,6 +670,7 @@ int main() {
         if (fork() == 0) {
             close(server_socket);
             prcclient(client_socket);
+            close(client_socket);
             exit(0);
         } else {
             close(client_socket);
