@@ -13,7 +13,7 @@
 
 #define PORT 8091  // Port number for the Spdf server
 #define BUFFER_SIZE 1024
-#define BASE_DIR "/home/chauha5a/ASP_Project_Main/Server/SpdfServer"  // Replace with your actual base directory
+#define BASE_DIR "/home/sethi83/ASP_Project_Main/Server/SpdfServer"  // Replace with your actual base directory
 
 // Function to map `~smain` to `~spdf` in the destination path
 char* map_path(const char* path) {
@@ -173,21 +173,23 @@ void handle_client(int client_socket) {
                 if (remove(filename) == 0) {
                     printf("File %s deleted successfully\n", filename);
                     strcpy(buffer, "File deleted successfully\n");
+                    // close(client_socket);
                 } else {
                     perror("Error deleting file");
                     strcpy(buffer, "Error deleting file\n");
                 }
                 write(client_socket, buffer, strlen(buffer));
+                close(client_socket);
 
             } else if (strcmp(command, "dtar") == 0) {
                 printf("Creating tarball for .pdf files\n");
 
                 char tar_file[BUFFER_SIZE];
-                snprintf(tar_file, sizeof(tar_file), "/home/chauha5a/ASP_Project_Main/Server/SpdfServer/pdffiles.tar");
+                snprintf(tar_file, sizeof(tar_file), "/home/sethi83/ASP_Project_Main/Server/SpdfServer/pdffiles.tar");
 
                 // Create a tarball of all .pdf files in the ~/spdf directory
-                int ret = system("find /home/chauha5a/ASP_Project_Main/Server/SpdfServer/~spdf -name '*.pdf' | tar -cvf /home/chauha5a/ASP_Project_Main/Server/SpdfServer/pdffiles.tar -T -");
-                int ret1 = system("find /home/chauha5a/ASP_Project_Main/Server/SpdfServer/~spdf -name '*.pdf' | tar -cvf /home/chauha5a/ASP_Project_Main/Client/pdffiles.tar -T -");
+                int ret = system("find/home/sethi83/ASP_Project_Main/Server/SpdfServer/~spdf -name '*.pdf' | tar -cvf /home/sethi83/ASP_Project_Main/Server/SpdfServer/pdffiles.tar -T -");
+                int ret1 = system("find /home/sethi83/ASP_Project_Main/Server/SpdfServer/~spdf -name '*.pdf' | tar -cvf /home/sethi83/ASP_Project_Main/Client/pdffiles.tar -T -");
                 if (ret != 0) {
                     perror("Error creating tar file");
                     strcpy(buffer, "Error creating tar file\n");

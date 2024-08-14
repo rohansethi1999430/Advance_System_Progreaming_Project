@@ -111,6 +111,7 @@ int main()
                         printf("End of file received.\n");
                         break; // End of file or transmission
                     }
+                    else{break;}
                 }
                 fclose(fp);
                 printf("File %s received successfully\n", filename);
@@ -163,6 +164,10 @@ int main()
                         printf("End of tar file received from Smain\n");
                         break; // End of file or transmission
                     }
+                    else{
+                        break;
+                    }
+
                 }
                 fclose(fp);
                 printf("Tarball %s received successfully\n", tar_filename);

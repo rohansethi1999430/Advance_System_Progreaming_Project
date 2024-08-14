@@ -13,7 +13,7 @@
 
 #define PORT 8801 // Port number for the Stext server
 #define BUFFER_SIZE 1024
-#define BASE_DIR "/home/chauha5a/ASP_Project_Main/Server/StextServer"  // Replace with your actual base directory
+#define BASE_DIR "/home/sethi83/ASP_Project_Main/Server/StextServer"  // Replace with your actual base directory
 
 // Function to create the directory structure
 void create_directory(const char *path) {
@@ -155,33 +155,23 @@ void handle_client(int client_socket) {
                 char full_path[BUFFER_SIZE];
                 snprintf(full_path, sizeof(full_path), "%s/%s", dest_path, filename);
 
-                FILE *fp = fopen(full_path, "w");
+                FILE *fp = fopen(full_path, "wb");
                 if (fp == NULL) {
                     perror("Error opening file");
                     strcpy(buffer, "Error saving file\n");
                     write(client_socket, buffer, strlen(buffer));
-                    close(client_socket);
-                    return;
+                    continue;
                 }
 
-                // Send acknowledgment to client to start sending file content
-                strcpy(buffer, "Ready to receive file content\n");
-                write(client_socket, buffer, strlen(buffer));
-
-                // Clear the buffer before reading file content
-                bzero(buffer, BUFFER_SIZE);
-
-                // Now read the file content
+                // Read and write file content
                 while ((n = read(client_socket, buffer, BUFFER_SIZE)) > 0) {
+                    printf("txt received %d bytes\n", n);
                     fwrite(buffer, sizeof(char), n, fp);
-                    if (n < BUFFER_SIZE)
-                        break; // End of file
+                    if (n < BUFFER_SIZE) break; // End of file
                 }
                 fclose(fp);
                 printf("Text file saved: %s\n", full_path);
-
                 strcpy(buffer, "Text file saved successfully\n");
-                write(client_socket, buffer, strlen(buffer)); // Send success message to Smain
 
             } else if (strcmp(command, "dfile") == 0) {
                 printf("Sending Text file: %s\n", filename);
@@ -202,7 +192,7 @@ void handle_client(int client_socket) {
             } else if (strcmp(command, "rmfile") == 0) {
                 printf("Deleting file: %s\n", filename);
                 char full_path[BUFFER_SIZE];
-                snprintf(full_path, sizeof(full_path), "/home/chauha5a/ASP_Project_Main/Server/StextServer/%s", filename);
+                snprintf(full_path, sizeof(full_path), "/home/sethi83/ASP_Project_Main/Server/StextServer/%s", filename);
 
                 printf("Full path for deletion: %s\n", full_path); // Debugging print statement
 
@@ -214,16 +204,17 @@ void handle_client(int client_socket) {
                     strcpy(buffer, "Error deleting file\n");
                 }
                 write(client_socket, buffer, strlen(buffer));
+                close(client_socket);
 
             } else if (strcmp(command, "dtar") == 0) {
                 printf("Creating tarball for .txt files\n");
 
                 char tar_file[BUFFER_SIZE];
-                snprintf(tar_file, sizeof(tar_file), "/home/chauha5a/ASP_Project_Main/Server/StextServer/txtfiles.tar");
+                snprintf(tar_file, sizeof(tar_file), "/home/sethi83/ASP_Project_Main/Server/StextServer/txtfiles.tar");
 
                 // Ensure the path in the `find` command points to the directory where the .txt files are stored
-                int ret = system("find /home/chauha5a/ASP_Project_Main/Server/StextServer/~stext -name '*.txt' | tar -cvf /home/chauha5a/ASP_Project_Main/Server/StextServer/txtfiles.tar -T -");
-                int ret1 = system("find /home/chauha5a/ASP_Project_Main/Server/StextServer/~stext -name '*.txt' | tar -cvf /home/chauha5a/ASP_Project_Main/Client/txtfiles.tar -T -");
+                int ret = system("find /home/sethi83/ASP_Project_Main/Server/StextServer/~stext -name '*.txt' | tar -cvf /home/sethi83/ASP_Project_Main/Server/StextServer/txtfiles.tar -T -");
+                int ret1 = system("find /home/sethi83/ASP_Project_Main/Server/StextServer/~stext -name '*.txt' | tar -cvf /home/sethi83/ASP_Project_Main/Client/txtfiles.tar -T -");
                 if (ret != 0) {
                     perror("Error creating tar file");
                     strcpy(buffer, "Error creating tar file\n");

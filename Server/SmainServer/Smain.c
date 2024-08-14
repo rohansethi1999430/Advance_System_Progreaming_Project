@@ -188,7 +188,7 @@ void handle_rmfile_request(int client_socket, const char *filename, const char *
     while ((n = read(sock, buffer, BUFFER_SIZE)) > 0) {
         write(client_socket, buffer, n);
     }
-
+    // close(client_socket);
     close(sock);
 }
 
@@ -377,6 +377,7 @@ void prcclient(int client_socket) {
                         strcpy(buffer, "Error deleting file\n");
                     }
                     write(client_socket, buffer, strlen(buffer));
+                    close(client_socket);
                 } else if (strstr(filename, ".pdf") != NULL) {
                     dest_path = replace_substring(filename, "~smain", "~spdf");
                     printf("Forwarding delete request for .pdf file: %s to Spdf server\n", dest_path);
