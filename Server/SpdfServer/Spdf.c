@@ -57,7 +57,10 @@ void list_files(const char *path, const char *extension, int client_socket) {
         if (stat(full_entry_path, &entry_stat) == 0 && S_ISREG(entry_stat.st_mode)) {
             if (strstr(entry->d_name, extension)) {
                 snprintf(buffer, sizeof(buffer), "%s\n", entry->d_name);
-                write(client_socket, buffer, strlen(buffer));
+                if (write(client_socket, buffer, strlen(buffer)) == -1) {
+                    perror("Error sending file name to client");
+                    break;
+                }
                 printf("File sent: %s\n", entry->d_name);  // Log the file sent
                 files_found = 1;  // File found, set the flag
             }
@@ -69,17 +72,20 @@ void list_files(const char *path, const char *extension, int client_socket) {
     // Check if no files were found
     if (!files_found) {
         snprintf(buffer, sizeof(buffer), "No %s files found in directory: %s\n", extension, path);
-        write(client_socket, buffer, strlen(buffer));
+        if (write(client_socket, buffer, strlen(buffer)) == -1) {
+            perror("Error sending no files found message to client");
+        }
     }
 
     closedir(dp);
 
     // Indicate end of file list to the client
-    write(client_socket, buffer, strlen(buffer));
+    snprintf(buffer, sizeof(buffer), "End of file list\n");
+    if (write(client_socket, buffer, strlen(buffer)) == -1) {
+        perror("Error sending end of file list to client");
+    }
     printf("End of file list sent for: %s\n", path);  // Log end of file list
-    close(client_socket);
 }
-
 
 // Function to create the directory structure
 void create_directory(const char *path) {
@@ -91,6 +97,7 @@ void create_directory(const char *path) {
     len = strlen(tmp);
     if (tmp[len - 1] == '/')
         tmp[len - 1] = 0;
+
     for (p = tmp + 1; *p; p++) {
         if (*p == '/') {
             *p = 0;
@@ -115,7 +122,11 @@ void handle_client(int client_socket) {
         bzero(buffer, BUFFER_SIZE);
         n = read(client_socket, buffer, BUFFER_SIZE);
         if (n <= 0) {
-            printf("Client disconnected\n");
+            if (n < 0) {
+                perror("Error reading from client socket");
+            } else {
+                printf("Client disconnected\n");
+            }
             break;
         }
         printf("Client: %s\n", buffer);
@@ -138,15 +149,23 @@ void handle_client(int client_socket) {
                 if (fp == NULL) {
                     perror("Error opening file");
                     strcpy(buffer, "Error saving file\n");
-                    write(client_socket, buffer, strlen(buffer));
+                    if (write(client_socket, buffer, strlen(buffer)) == -1) {
+                        perror("Error sending file save error message to client");
+                    }
                     continue;
                 }
 
                 // Read and write file content
                 while ((n = read(client_socket, buffer, BUFFER_SIZE)) > 0) {
                     printf("Spdf received %d bytes\n", n);
-                    fwrite(buffer, sizeof(char), n, fp);
+                    if (fwrite(buffer, sizeof(char), n, fp) != n) {
+                        perror("Error writing to file");
+                        break;
+                    }
                     if (n < BUFFER_SIZE) break; // End of file
+                }
+                if (ferror(fp)) {
+                    perror("Error writing to file");
                 }
                 fclose(fp);
                 printf("PDF file saved: %s\n", full_path);
@@ -160,40 +179,53 @@ void handle_client(int client_socket) {
                 if (fd == -1) {
                     perror("Error opening file");
                     strcpy(buffer, "Error reading file\n");
-                    write(client_socket, buffer, strlen(buffer));
+                    if (write(client_socket, buffer, strlen(buffer)) == -1) {
+                        perror("Error sending file read error message to client");
+                    }
                 } else {
                     while ((n = read(fd, buffer, BUFFER_SIZE)) > 0) {
-                        write(client_socket, buffer, n);
+                        if (write(client_socket, buffer, n) == -1) {
+                            perror("Error sending file to client");
+                            break;
+                        }
                     }
-                    close(client_socket);
+                    if (n < 0) {
+                        perror("Error reading file for client");
+                    }
                     close(fd);
                 }
+                free(full_path);
+                close(client_socket);
             } else if (strcmp(command, "rmfile") == 0) {
                 printf("Deleting file: %s\n", filename);
-                if (remove(filename) == 0) {
-                    printf("File %s deleted successfully\n", filename);
+                char *full_path = map_path(filename);
+                if (remove(full_path) == 0) {
+                    printf("File %s deleted successfully\n", full_path);
                     strcpy(buffer, "File deleted successfully\n");
-                    // close(client_socket);
                 } else {
                     perror("Error deleting file");
                     strcpy(buffer, "Error deleting file\n");
                 }
-                write(client_socket, buffer, strlen(buffer));
+                if (write(client_socket, buffer, strlen(buffer)) == -1) {
+                    perror("Error sending file delete message to client");
+                }
+                free(full_path);
                 close(client_socket);
 
             } else if (strcmp(command, "dtar") == 0) {
                 printf("Creating tarball for .pdf files\n");
 
                 char tar_file[BUFFER_SIZE];
-                snprintf(tar_file, sizeof(tar_file), "/home/sethi83/ASP_Project_Main/Server/SpdfServer/pdffiles.tar");
+                snprintf(tar_file, sizeof(tar_file), "%s/pdffiles.tar", BASE_DIR);
 
                 // Create a tarball of all .pdf files in the ~/spdf directory
-                int ret = system("find/home/sethi83/ASP_Project_Main/Server/SpdfServer/~spdf -name '*.pdf' | tar -cvf /home/sethi83/ASP_Project_Main/Server/SpdfServer/pdffiles.tar -T -");
-                int ret1 = system("find /home/sethi83/ASP_Project_Main/Server/SpdfServer/~spdf -name '*.pdf' | tar -cvf /home/sethi83/ASP_Project_Main/Client/pdffiles.tar -T -");
+                int ret = system("find /home/sethi83/ASP_Project_Main/Server/SpdfServer/~spdf -name '*.pdf' | tar -cvf /home/sethi83/ASP_Project_Main/Server/SpdfServer/pdffiles.tar -T -");
                 if (ret != 0) {
                     perror("Error creating tar file");
                     strcpy(buffer, "Error creating tar file\n");
-                    write(client_socket, buffer, strlen(buffer));
+                    if (write(client_socket, buffer, strlen(buffer)) == -1) {
+                        perror("Error sending tar file creation error to client");
+                    }
                     continue;
                 }
 
@@ -203,23 +235,29 @@ void handle_client(int client_socket) {
                 if (fd == -1) {
                     perror("Error opening tar file");
                     strcpy(buffer, "Error reading tar file\n");
-                    write(client_socket, buffer, strlen(buffer));
+                                        if (write(client_socket, buffer, strlen(buffer)) == -1) {
+                        perror("Error sending tar file read error to client");
+                    }
                 } else {
                     while ((n = read(fd, buffer, BUFFER_SIZE)) > 0) {
                         if (write(client_socket, buffer, n) != n) {
-                            perror("Error sending tar file");
+                            perror("Error sending tar file to client");
                             break;
                         }
                         printf("Sent %d bytes of tar file to Smain\n", n);  // Debug print
                     }
+                    if (n < 0) {
+                        perror("Error reading tar file for client");
+                    }
                     close(fd);
                     printf("Tarball sent to Smain\n");
                 }
-
             } else if (strcmp(command, "display") == 0) {
                 if (filename == NULL || strlen(filename) == 0) {
                     strcpy(buffer, "Error: Filename or path is missing for display command\n");
-                    write(client_socket, buffer, strlen(buffer));
+                    if (write(client_socket, buffer, strlen(buffer)) == -1) {
+                        perror("Error sending missing filename error to client");
+                    }
                     continue;
                 }
 
@@ -227,6 +265,14 @@ void handle_client(int client_socket) {
 
                 // Map the `~smain` path to the actual `~spdf` directory path
                 char *full_path = map_path(filename);
+                if (full_path == NULL) {
+                    perror("Error mapping path");
+                    strcpy(buffer, "Error mapping path\n");
+                    if (write(client_socket, buffer, strlen(buffer)) == -1) {
+                        perror("Error sending path mapping error to client");
+                    }
+                    continue;
+                }
                 printf("Mapped path: %s\n", full_path);
 
                 // List .pdf files in the mapped directory
@@ -235,12 +281,16 @@ void handle_client(int client_socket) {
                 free(full_path);
             } else {
                 strcpy(buffer, "Unknown command\n");
+                if (write(client_socket, buffer, strlen(buffer)) == -1) {
+                    perror("Error sending unknown command error to client");
+                }
             }
-            write(client_socket, buffer, strlen(buffer));  // Send response to Smain
         } else {
             printf("Invalid command received.\n");
             strcpy(buffer, "Invalid command\n");
-            write(client_socket, buffer, strlen(buffer));
+            if (write(client_socket, buffer, strlen(buffer)) == -1) {
+                perror("Error sending invalid command error to client");
+            }
         }
     }
 
@@ -255,17 +305,17 @@ int main() {
 
     server_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (server_socket < 0) {
-        printf("Error in socket creation\n");
-        exit(1);
+        perror("Error in socket creation");
+        exit(EXIT_FAILURE);
     }
     printf("Socket created successfully\n");
 
     // Set the SO_REUSEADDR option to allow port reuse
     int opt = 1;
-    if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+    if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1) {
         perror("setsockopt failed");
         close(server_socket);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     bzero(&server_addr, sizeof(server_addr));
@@ -274,18 +324,18 @@ int main() {
     server_addr.sin_port = htons(PORT);
 
     // Bind the socket to the specified port and address
-    if ((bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr))) != 0) {
+    if (bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) != 0) {
         perror("Socket bind failed");
         close(server_socket);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     printf("Socket binded successfully\n");
 
     // Listen for incoming connections
-    if ((listen(server_socket, 5)) != 0) {
-        printf("Listen failed\n");
+    if (listen(server_socket, 5) != 0) {
+        perror("Listen failed");
         close(server_socket);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     printf("Server listening...\n");
 
@@ -294,7 +344,7 @@ int main() {
     while (1) {
         client_socket = accept(server_socket, (struct sockaddr*)&client_addr, &len);
         if (client_socket < 0) {
-            printf("Server accept failed\n");
+            perror("Server accept failed");
             continue;
         }
         printf("Server accepted the Smain request\n");
@@ -302,7 +352,7 @@ int main() {
         if (fork() == 0) {
             close(server_socket);
             handle_client(client_socket);
-            exit(0);
+            exit(EXIT_SUCCESS);
         } else {
             close(client_socket);
         }

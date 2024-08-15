@@ -36,8 +36,8 @@ int main()
     client_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (client_socket < 0)
     {
-        printf("Error in socket creation\n");
-        exit(1);
+        perror("Error in socket creation");
+        exit(EXIT_FAILURE);
     }
     printf("Socket created successfully\n");
 
@@ -49,8 +49,9 @@ int main()
 
     if (connect(client_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) != 0)
     {
-        printf("Connection to Smain failed\n");
-        exit(1);
+        perror("Connection to Smain failed");
+        close(client_socket);
+        exit(EXIT_FAILURE);
     }
     printf("Connected to Smain\n");
 
@@ -60,16 +61,30 @@ int main()
         bzero(command, BUFFER_SIZE);
 
         printf("Enter command: ");
-        fgets(command, BUFFER_SIZE, stdin);
+        if (fgets(command, BUFFER_SIZE, stdin) == NULL)
+        {
+            perror("Error reading command");
+            continue;
+        }
         command[strcspn(command, "\n")] = 0; // Remove newline character
         printf("Sending command: %s\n", command);
 
-        write(client_socket, command, strlen(command));
+        if (write(client_socket, command, strlen(command)) < 0)
+        {
+            perror("Error sending command to server");
+            continue;
+        }
 
         // Handle 'ufile' command
         if (strncmp("ufile", command, 5) == 0)
         {
             char *filename = strtok(command + 6, " "); // Get filename after 'ufile '
+            if (filename == NULL)
+            {
+                fprintf(stderr, "Error: No filename provided\n");
+                continue;
+            }
+
             fp = fopen(filename, "r");
             if (fp == NULL)
             {
@@ -81,8 +96,18 @@ int main()
             // Send file content to the server
             while ((n = fread(buffer, 1, BUFFER_SIZE, fp)) > 0)
             {
-                write(client_socket, buffer, n);
+                if (write(client_socket, buffer, n) < 0)
+                {
+                    perror("Error sending file content to server");
+                    break;
+                }
             }
+
+            if (ferror(fp))
+            {
+                perror("Error reading from file");
+            }
+
             fclose(fp);
         }
 
@@ -105,19 +130,33 @@ int main()
                 int bytes_received;
                 while ((bytes_received = read(client_socket, buffer, BUFFER_SIZE)) > 0)
                 {
-                    fwrite(buffer, sizeof(char), bytes_received, fp);
+                    if (fwrite(buffer, sizeof(char), bytes_received, fp) != bytes_received)
+                    {
+                        perror("Error writing to file");
+                        break;
+                    }
+
                     if (bytes_received < BUFFER_SIZE)
                     {
                         printf("End of file received.\n");
                         break; // End of file or transmission
                     }
-                    else{break;}
                 }
+
+                if (bytes_received < 0)
+                {
+                    perror("Error receiving file from server");
+                }
+
                 fclose(fp);
                 printf("File %s received successfully\n", filename);
                 free(filename);
-                continue;
             }
+            else
+            {
+                fprintf(stderr, "Error: No file path provided\n");
+            }
+            continue;
         }
 
         // Handle 'rmfile' command
@@ -127,6 +166,10 @@ int main()
             if (filepath != NULL)
             {
                 printf("Sending file removal request for: %s\n", filepath);
+            }
+            else
+            {
+                fprintf(stderr, "Error: No file path provided\n");
             }
         }
 
@@ -141,7 +184,7 @@ int main()
                 printf("Receiving tarball: %s\n", tar_filename);
 
                 // Open the file for writing in binary mode
-                FILE *fp = fopen(tar_filename, "wb");
+                fp = fopen(tar_filename, "wb");
                 if (fp == NULL)
                 {
                     perror("Error creating tar file");
@@ -158,21 +201,26 @@ int main()
                         break;
                     }
 
-                    // Break out of the loop if we received less than the buffer size, indicating the end of the file
                     if (bytes_received < BUFFER_SIZE)
                     {
                         printf("End of tar file received from Smain\n");
                         break; // End of file or transmission
                     }
-                    else{
-                        break;
-                    }
-
                 }
+
+                if (bytes_received < 0)
+                {
+                    perror("Error receiving tar file from server");
+                }
+
                 fclose(fp);
                 printf("Tarball %s received successfully\n", tar_filename);
-                continue;
             }
+            else
+            {
+                fprintf(stderr, "Error: No file type provided\n");
+            }
+            continue;
         }
 
         // Handle 'display' command
@@ -188,6 +236,11 @@ int main()
                 {
                     break; // End of transmission
                 }
+            }
+
+            if (bytes_received < 0)
+            {
+                perror("Error receiving file list from server");
             }
             continue;
         }
