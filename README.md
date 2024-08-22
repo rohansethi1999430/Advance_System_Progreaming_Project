@@ -1,6 +1,3 @@
-Here's a comprehensive `README.md` file for your project:
-
----
 
 # Distributed File System Project
 
